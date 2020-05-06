@@ -1,0 +1,2 @@
+# tokmangan
+codes for TokenManipulationGAN
