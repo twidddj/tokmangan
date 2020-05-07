@@ -4,13 +4,8 @@
 # TokManGAN
 codes for TokManGAN: [Token Manipulation Generative Adversarial Network for Text Generation](https://arxiv.org/pdf/2005.02794.pdf) 
 
-
-
-### Pre-trained model(MLE mode)
-| Model URL                                                                 | Data       | Steps        |
-|---------------------------------------------------------------------------|------------|--------------|
-| [link](https://drive.google.com/open?id=1Sr7zah3GC9ekLqsgT3qlF1vLQ9KdRkVD)| Image COCO | 80 epochs    |
-|  | EMNLP News |    |
+This is a hierarchical sequence generation model, that first decides whether a blank is added or used a given token, 
+if a blank is added then fill it, otherwise decides how utilize a given token (use , replace, ignore, etc). 
 
 ## Instructions
 ##### 1. Run TokManGAN in MLE mode
@@ -23,8 +18,14 @@ codes for TokManGAN: [Token Manipulation Generative Adversarial Network for Text
 * For checking details (You can find result files that start with 'details' in <a href="./save/coco_tokmangan">here</a>)
 > `python generate_for_details.py -g tokmangan -t GAN -d coco -s 32 --n_generate_per_seed 10 --gen_vd_keep_prob 0.8`
 
-   
 + You can also produce MaskGAN model using on this project. (specify the option in the script as *--gan_model maskgan* or *-g maskgan*)
+
+## Pre-trained model(MLE mode)
+| Model URL                                                                 | Data       | Steps        |
+|---------------------------------------------------------------------------|------------|--------------|
+| [link](https://drive.google.com/open?id=1Sr7zah3GC9ekLqsgT3qlF1vLQ9KdRkVD)| Image COCO | 80 epochs    |
+|  | EMNLP News |    |
+
 
 ## Synthetic data experiment
 * You can find text samples synthesized in <a href="./save/coco_tokmangan">here</a>
