@@ -34,10 +34,10 @@ if a blank is added then fill it, otherwise decides how utilize a given token (u
 
 ## Requirements
 * Code is tested on TensorFlow version 1.14 for Python 3.6.
-* For evaluation you need to download the external project - [GansFallingShort](https://github.com/pclucas14/GansFallingShort)
+* For evaluation you need to download the external project - [GANsFallingShort](https://github.com/pclucas14/GansFallingShort)
 
 ## References
 We have helped a lot in the following projects.
 - [MaskGAN](https://github.com/tensorflow/models/tree/master/research/maskgan)
 - [Texygen](https://github.com/geek-ai/Texygen)
-- [GansFallingShort](https://github.com/pclucas14/GansFallingShort)
+- [GANsFallingShort](https://github.com/pclucas14/GansFallingShort)
