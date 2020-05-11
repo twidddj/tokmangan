@@ -95,6 +95,7 @@ class TokManGAN(object):
         self.acts = tf.placeholder(tf.int32, shape=[self.batch_size, self.sequence_length], name="target_acts")
         self.seed_len = tf.placeholder(tf.int32, shape=[self.batch_size, ], name="seed_len")  # n_seed
         self.learning_rate = tf.placeholder(tf.float32, name='learning_rate')
+        self.temp = tf.placeholder(tf.float32, name='temperature')
 
         with tf.variable_scope('TokGANGenerator'):
             self.create()
@@ -204,7 +205,11 @@ class TokManGAN(object):
             if output_mask is not None:
                 out *= output_mask
 
-            o_t = self.g_output_unit(out)  # batch x vocab , logits not prob
+            if not self.is_training:
+                o_t = self.g_output_unit(out * self.temp)  # batch x vocab , logits not prob
+            else:
+                o_t = self.g_output_unit(out)
+
             a_t = self.g_act_unit(out)  # batch x len(ACT)
 
             prob = tf.nn.softmax(o_t)

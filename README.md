@@ -5,6 +5,7 @@
 codes for TokManGAN: [Token Manipulation Generative Adversarial Network for Text Generation](https://arxiv.org/pdf/2005.02794.pdf) 
 
 This is a hierarchical sequence generation model, that first decides whether a blank is added or not, 
+
 if a blank is added then fill it, otherwise decides how utilize a given token (use, ignore, etc). 
 
 ## Instructions

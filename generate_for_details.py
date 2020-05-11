@@ -49,7 +49,8 @@ if __name__ == '__main__':
     ap.add_argument('-d', '--dataset', default='coco', choices=['coco', 'emnlp'])
     ap.add_argument('-s', '--unit_size', default=32, type=int)
     ap.add_argument('-n', '--n_generate_per_seed', default=10, type=int)
-    ap.add_argument('-r', '--gen_vd_keep_prob', default=.8, type=float)
+    ap.add_argument('-r', '--gen_vd_keep_prob', default=1., type=float)
+    ap.add_argument('-a', '--temperature', default=1., type=float)
     args = ap.parse_args()
 
     db = args.dataset
@@ -104,15 +105,16 @@ if __name__ == '__main__':
             acts_per_seed = []
 
             for k in range(n_generate_per_seed):
-                gen_samples, gen_acts, _, _, _ = helper.generate(target, seed, seed_len, missing)
+                gen_samples, gen_acts, _, _, _ = helper.generate(target, seed, seed_len, missing, temp=args.temperature)
                 samples_per_seed.append(gen_samples)
                 acts_per_seed.append(gen_acts)
             test_gen_samples.append(samples_per_seed)
             test_gen_acts.append(acts_per_seed)
 
         paras = details_paras(batches, seeds, missings, test_gen_samples, test_gen_acts, n_generate_per_seed)
-        _key = key.replace('.', '')
-        _vd = str(args.gen_vd_keep_prob).replace('.', '')
-        fpath = os.path.join(helper.save_dir, 'details_{}_{}_{}_[pr-{}_vd-{}].txt'.format(db, mode, epoch, _key, _vd))
+        _key = key
+        _vd = args.gen_vd_keep_prob
+        fpath = os.path.join(helper.save_dir, 'details_{}_{}_{}_[pr-{}_vd-{}_temp-{}].txt'.format(db, mode, epoch, _key,
+                                                                                                   _vd, args.temperature))
         with open(fpath, 'w') as outfile:
             outfile.write(paras)

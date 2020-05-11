@@ -80,43 +80,46 @@ if __name__ == '__main__':
     else:
         epoch = helper.load(helper.log_dir_MLE)
 
-    # generate unconditional samples
-    helper.min_present_rate = 0.0
-    helper.max_present_rate = 0.0
+    TEMPERATURES = [0.8, 0.9, 0.95, 1.0, 1.01, 1.02, 1.03, 1.04, 1.06, 1.07, 1.08, 1.09, 2.25, 2.5, 2.75, 3.25, 3.5, 3.75]
 
-    samples, acts, seed, seed_len, targets, _ = \
-        generate_cond_samples(helper, helper.oracle_data_loader, output_file=helper.generator_file, pass_rate=0.0)
+    for temp in TEMPERATURES:
+        # generate unconditional samples
+        helper.min_present_rate = 0.0
+        helper.max_present_rate = 0.0
 
-    fpath = helper.get_samples_fpath(mode, epoch)
+        samples, acts, seed, seed_len, targets, _ = \
+            generate_cond_samples(helper, helper.oracle_data_loader, temp=temp, output_file=helper.generator_file, pass_rate=0.0)
 
-    get_real_test_file(helper.generator_file, fpath, helper.iw_dict)
+        fpath = helper.get_samples_fpath(mode, epoch, temp=temp)
 
-    # generate conditional samples
-    seed_info_dict = seed_extraction(db, model_name, present_rates=[0.25, 0.5, 0.75])
-    present_rates = seed_info_dict.keys()
-    for key in present_rates:
-        present_rate = float(key)
+        get_real_test_file(helper.generator_file, fpath, helper.iw_dict)
 
-        batches = seed_info_dict[key]['batches']
-        seeds = seed_info_dict[key]['seeds']
-        seeds_len = seed_info_dict[key]['seeds_len']
-        missings = seed_info_dict[key]['missings']
+        # generate conditional samples
+        seed_info_dict = seed_extraction(db, model_name, present_rates=[0.25, 0.5, 0.75])
+        present_rates = seed_info_dict.keys()
+        for key in present_rates:
+            present_rate = float(key)
 
-        samples = []
+            batches = seed_info_dict[key]['batches']
+            seeds = seed_info_dict[key]['seeds']
+            seeds_len = seed_info_dict[key]['seeds_len']
+            missings = seed_info_dict[key]['missings']
 
-        helper.min_present_rate = present_rate
-        helper.max_present_rate = present_rate
+            samples = []
 
-        for i in range(len(seeds)):
-            target = batches[i]
-            seed = seeds[i]
-            seed_len = seeds_len[i]
-            missing = missings[i]
+            helper.min_present_rate = present_rate
+            helper.max_present_rate = present_rate
 
-            gen_samples, gen_acts, _, _, _ = helper.generate(target, seed, seed_len, missing)
-            samples.extend(gen_samples)
+            for i in range(len(seeds)):
+                target = batches[i]
+                seed = seeds[i]
+                seed_len = seeds_len[i]
+                missing = missings[i]
 
-        fpath = helper.get_samples_fpath(mode, epoch)
-        get_real_test_file(samples, fpath, helper.iw_dict)
+                gen_samples, gen_acts, _, _, _ = helper.generate(target, seed, seed_len, missing, temp=temp)
+                samples.extend(gen_samples)
+
+            fpath = helper.get_samples_fpath(mode, epoch, temp=temp)
+            get_real_test_file(samples, fpath, helper.iw_dict)
 
 

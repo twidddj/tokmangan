@@ -19,7 +19,7 @@ def get_batch_seq_len(xs):
     return list(map(lambda x: len([y for y in x if y != END_TOKEN_IDX and y != PAD_TOKEN_IDX]), xs))
 
 
-def generate_cond_samples(helper, data_loader, output_file=None, get_code=True, pass_rate=None):
+def generate_cond_samples(helper, data_loader, output_file=None, get_code=True, pass_rate=None, temp=1):
     # Generate Samples
     data_loader.reset_pointer()
     seeds = []
@@ -35,7 +35,7 @@ def generate_cond_samples(helper, data_loader, output_file=None, get_code=True, 
     for it in range(data_loader.num_batch):
         batch = data_loader.next_batch()
         if np.random.random() > pass_rate:
-            _generated_samples, _act, _seed, _seed_len, _real_acts = helper.generate(batch)
+            _generated_samples, _act, _seed, _seed_len, _real_acts = helper.generate(batch, temp=temp)
             generated_samples.extend(_generated_samples)
             generated_acts.append(_act)
             seeds.append(_seed)
@@ -247,10 +247,10 @@ class Helper:
     def _get_samples_fpath(self, train_method, epoch):
         return self.test_file.format(train_method, epoch)
 
-    def get_samples_fpath(self, mode, epoch):
-        fpath = '{}_{}_generated_{}_real[{}_{}].txt'.format(self.db, mode, str(epoch),
-                                                            str(self.min_present_rate).replace('.', ''),
-                                                            str(self.max_present_rate).replace('.', ''))
+    def get_samples_fpath(self, mode, epoch, temp=1):
+        min_pr = self.min_present_rate
+        max_pr = self.max_present_rate
+        fpath = '{}_{}_epoch[{}]_pr[{}_{}]_temp[{}].txt'.format(self.db, mode, str(epoch), min_pr, max_pr, temp)
         return os.path.join(self.save_dir, fpath)
 
     def picking_seed(self, batch, batch_len, selection_rate=0.5, mask_strategy='mix'):
@@ -448,14 +448,14 @@ class Helper:
             print('start adversarial training:')
             self.train_gan()
 
-    def generate(self, batch, seed=None, seed_len=None, target_acts=None):
-        batch_len = get_batch_seq_len(batch)
-
+    def generate(self, batch, seed=None, seed_len=None, target_acts=None, temp=1):
         if seed is None:
+            batch_len = get_batch_seq_len(batch)
             seed, seed_len, target_acts = self.picking_seed(batch, batch_len)
 
         gen_result, gen_act = self.sess.run([self.generator.gen_x, self.generator.gen_act], feed_dict={
-            self.generator.seed: seed
+            self.generator.seed: seed,
+            self.generator.temp: temp
         })
 
         return gen_result.tolist(), gen_act, seed, seed_len, target_acts
@@ -625,15 +625,15 @@ class Helper4MaskGAN(Helper):
                                    acts=missing, targets=targets)
                 self.save(self.log_dir_GAN, epoch)
 
-    def generate(self, batch, seed=None, seed_len=None, target_acts=None):
-        batch_len = get_batch_seq_len(batch)
-
+    def generate(self, batch, seed=None, seed_len=None, target_acts=None, temp=1):
         if target_acts is None:
+            batch_len = get_batch_seq_len(batch)
             seed, seed_len, target_acts = self.picking_seed(batch, batch_len)
 
         gen_result = self.sess.run(self.generator.gen_x, feed_dict={
             self.generator.x: batch,
-            self.generator.missing: target_acts
+            self.generator.missing: target_acts,
+            self.generator.temp: temp
         })
 
         return gen_result.tolist(), np.zeros_like(target_acts), seed, seed_len, target_acts

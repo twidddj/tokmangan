@@ -1,3 +1,10 @@
+# generated results
+save/*/coco*.txt
+save/*/coco*.txt
+save/*/generator.txt
+save/*/oracle.txt
+save/*/test_oracle.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

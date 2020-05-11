@@ -48,6 +48,7 @@ class MaskGAN(object):
         self.missing = tf.placeholder(tf.int32, shape=[self.batch_size, self.sequence_length], name="missing")
         self.x_len = tf.placeholder(tf.int32, shape=[self.batch_size, ], name="x_len")  # n_x
         self.learning_rate = tf.placeholder(tf.float32, name='learning_rate')
+        self.temp = tf.placeholder(tf.float32, name='temperature')
 
         self.masked_inputs = transform_input_with_is_missing_token(self, self.x, (1 - self.missing))
 
@@ -165,6 +166,9 @@ class MaskGAN(object):
 
             if output_mask is not None:
                 out *= output_mask
+
+            if not self.is_training:
+                out *= self.temp
 
             o_t = self.g_output_unit(out)  # batch x vocab , logits not prob
 
