@@ -21,13 +21,6 @@ if a blank is added then fill it, otherwise decides how utilize a given token (u
 
 + You can also produce MaskGAN model using on this project. (specify the option in the script as *--gan_model maskgan* or *-g maskgan*)
 
-## Pre-trained model(MLE mode)
-| Model URL                                                                 | Data       | Steps        |
-|---------------------------------------------------------------------------|------------|--------------|
-| [link](https://drive.google.com/open?id=1Sr7zah3GC9ekLqsgT3qlF1vLQ9KdRkVD)| Image COCO | 80 epochs    |
-|  | EMNLP News |    |
-
-
 ## Synthetic data experiment
 * You can find text samples synthesized in <a href="./save/coco_tokmangan">here</a>
 * Codes for evaluation are placed in <a href="./evaluation.ipynb">here</a>
