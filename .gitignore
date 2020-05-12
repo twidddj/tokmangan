@@ -5,6 +5,9 @@ save/*/generator.txt
 save/*/oracle.txt
 save/*/test_oracle.txt
 
+.DS_Store
+.idea
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
