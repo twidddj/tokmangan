@@ -4,8 +4,9 @@ import numpy as np
 
 import common.attention_utils as attention_utils
 from tokmangan.modules import Discriminator, Critic
-from common.config import ACT, START_TOKEN_IDX, END_TOKEN_IDX, PAD_TOKEN_IDX
-from common.utils import get_mask, VariationalDropoutWrapper, make_mask, clip_and_log, get_train_op
+from common.config import ACT
+from common.utils import get_mask, make_mask, clip_and_log, get_train_op
+from common.modules import Generator
 
 
 def transform_seed_with_token(generator, seed, acts, act_dict=ACT):
@@ -61,41 +62,27 @@ def transform_seed_with_token(generator, seed, acts, act_dict=ACT):
     return transformed
 
 
-class TokManGAN(object):
+class TokManGAN(Generator):
     def __init__(self, num_vocabulary, batch_size, emb_dim, hidden_dim, sequence_length, seed_length,
-                 reward_gamma=0.9, is_training=False, gen_vd_keep_prob=1, dis_vd_keep_prob=1):
+                 reward_gamma=0.9, is_training=False, gen_vd_keep_prob=1, dis_vd_keep_prob=1, n_rnn_layers=2,
+                 clip_val=5.0):
 
-        self.is_training = is_training
-        self.num_vocabulary = num_vocabulary
-        self.batch_size = batch_size
-        self.emb_dim = emb_dim
-        self.hidden_dim = hidden_dim
+        super().__init__(num_vocabulary, batch_size, emb_dim, hidden_dim, sequence_length, is_training,
+                         gen_vd_keep_prob=gen_vd_keep_prob, n_rnn_layers=n_rnn_layers, clip_val=clip_val)
 
-        self.sequence_length = sequence_length
         self.seed_sequence_length = seed_length
         self.n_actions = len(ACT)
 
-        self.n_rnn_layers = 2
-
         self.reward_gamma = reward_gamma
-        self.clip_val = 5.0
 
-        self.gen_vd_keep_prob = gen_vd_keep_prob
         self.dis_vd_keep_prob = dis_vd_keep_prob
 
-        self.start_token = tf.constant([START_TOKEN_IDX] * self.batch_size, dtype=tf.int32)
-        self.end_token = tf.constant([END_TOKEN_IDX] * self.batch_size, dtype=tf.int32)
-        self.pad_token = tf.constant([PAD_TOKEN_IDX] * self.batch_size, dtype=tf.int32)
         self.maximum_seed_idx = tf.constant([self.seed_sequence_length - 1] * batch_size, dtype=tf.int32)
 
-        # placeholder definition
-        self.x = tf.placeholder(tf.int32, shape=[self.batch_size, self.sequence_length], name="target_x")
-        self.x_len = tf.placeholder(tf.int32, shape=[self.batch_size, ], name="x_len")  # n_x
+        # additional placeholder definition
         self.seed = tf.placeholder(tf.int32, shape=[self.batch_size, self.seed_sequence_length], name="seed")
         self.acts = tf.placeholder(tf.int32, shape=[self.batch_size, self.sequence_length], name="target_acts")
         self.seed_len = tf.placeholder(tf.int32, shape=[self.batch_size, ], name="seed_len")  # n_seed
-        self.learning_rate = tf.placeholder(tf.float32, name='learning_rate')
-        self.temp = tf.placeholder(tf.float32, name='temperature')
 
         with tf.variable_scope('TokGANGenerator'):
             self.create()
@@ -127,19 +114,9 @@ class TokManGAN(object):
 
 
     def create(self, reuse=None):
-        init_embeddings = tf.random_uniform([self.num_vocabulary, self.emb_dim], -1.0, 1.0)
-        self.g_embeddings = tf.get_variable("embeddings", initializer=init_embeddings)
-
-        def lstm_cell():
-            return tf.contrib.rnn.BasicLSTMCell(self.hidden_dim, forget_bias=0.0, state_is_tuple=True, reuse=reuse)
-
-        attn_cell = lstm_cell
-        if self.is_training and self.gen_vd_keep_prob < 1:
-            def attn_cell():
-                return VariationalDropoutWrapper(lstm_cell(), self.batch_size, self.gen_vd_keep_prob,
-                                                 self.gen_vd_keep_prob)
-
+        self.g_embeddings = self.create_embedding()
         with tf.variable_scope('seed_encoder') as scope:
+            attn_cell = self.create_cell(reuse=reuse)
             embedded_seed = tf.nn.embedding_lookup(self.g_embeddings, self.seed)
 
             cell = tf.contrib.rnn.MultiRNNCell([attn_cell() for _ in range(self.n_rnn_layers)], state_is_tuple=True)
@@ -169,14 +146,7 @@ class TokManGAN(object):
                 self.encoded_seed, 'luong', num_units=self.hidden_dim)
 
         with tf.variable_scope('generator'):
-            def lstm_cell():
-                return tf.contrib.rnn.BasicLSTMCell(self.hidden_dim, forget_bias=0.0, state_is_tuple=True, reuse=reuse)
-
-            attn_cell = lstm_cell
-            if self.gen_vd_keep_prob < 1:
-                def attn_cell():
-                    return VariationalDropoutWrapper(lstm_cell(), self.batch_size, self.gen_vd_keep_prob, self.gen_vd_keep_prob)
-
+            attn_cell = self.create_cell(cond=True, reuse=reuse)
             self.g_recurrent_unit = tf.contrib.rnn.MultiRNNCell([attn_cell() for _ in range(self.n_rnn_layers)],
                                                                 state_is_tuple=True)
             self.g_output_unit = self.create_output_unit()  # maps h_t to o_t (output token logits)
@@ -443,19 +413,6 @@ class TokManGAN(object):
             loss = -tf.reduce_sum(one_hot_target * log_prob, -1)
             losses.append(tf.reduce_sum(loss * mask) / tf.reduce_sum(mask))
         return tf.reduce_mean(losses)
-
-    def init_matrix(self, shape):
-        return tf.random_normal(shape, stddev=0.1)
-
-    def create_output_unit(self):
-        self.Wo = tf.Variable(self.init_matrix([self.hidden_dim, self.num_vocabulary]), name='Wo')
-        self.bo = tf.Variable(self.init_matrix([self.num_vocabulary]), name='bo')
-
-        def unit(hidden_state):
-            logits = tf.matmul(hidden_state, self.Wo) + self.bo
-            return logits
-
-        return unit
 
     def create_action_unit(self):
         self.Wo_act = tf.Variable(self.init_matrix([self.hidden_dim, self.n_actions]), name='Wo_act')

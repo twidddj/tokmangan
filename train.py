@@ -5,9 +5,6 @@ import numpy as np
 from time import time
 import argparse
 
-from tokmangan.TokManGAN import TokManGAN
-from maskgan.MaskGAN import MaskGAN
-
 from common.DataLoader import DataLoader
 from common.config import ACT, START_TOKEN_IDX, END_TOKEN_IDX, PAD_TOKEN_IDX
 from common.text_process import text_precess, text_to_code
@@ -202,6 +199,7 @@ class Helper:
         self.max_seed_len = int(self.sequence_length * self.max_present_rate) + 1
 
     def build(self):
+        from tokmangan.TokManGAN import TokManGAN
         self.generator = TokManGAN(self.vocab_size, self.batch_size, self.emb_dim, self.hidden_dim, self.sequence_length, self.max_seed_len,
                  is_training=self.is_training, gen_vd_keep_prob=self.gen_vd_keep_prob, dis_vd_keep_prob=self.dis_vd_keep_prob)
 
@@ -463,6 +461,7 @@ class Helper:
 
 class Helper4MaskGAN(Helper):
     def build(self):
+        from maskgan.MaskGAN import MaskGAN
         self.generator = MaskGAN(self.vocab_size, self.batch_size, self.emb_dim, self.hidden_dim, self.sequence_length,
                  is_training=self.is_training, gen_vd_keep_prob=self.gen_vd_keep_prob, dis_vd_keep_prob=self.dis_vd_keep_prob)
 
@@ -639,48 +638,106 @@ class Helper4MaskGAN(Helper):
         return gen_result.tolist(), np.zeros_like(target_acts), seed, seed_len, target_acts
 
 
-def get_helper(db, model_name):
+class Helper4LM(Helper):
+    def build(self):
+        from common.modules import Generator
+        self.generator = Generator(self.vocab_size, self.batch_size, self.emb_dim, self.hidden_dim, self.sequence_length,
+                 is_training=self.is_training, gen_vd_keep_prob=self.gen_vd_keep_prob)
+        self.generator.create()
+        self.t_vars = tf.trainable_variables()
+        self.saver = tf.train.Saver(var_list=self.t_vars, max_to_keep=50)
+        self.sess.run(tf.global_variables_initializer())
+
+        self._build_data_loader()
+
+    def pretrain(self):
+        last_epoch = self.load(self.log_dir_MLE)
+        if last_epoch is None:
+            last_epoch = 0
+        for epoch in range(last_epoch + 1, self.pre_epoch_num + 1):
+            start = time()
+            losses = []
+            self.gen_data_loader.reset_pointer()
+            for it in range(self.gen_data_loader.num_batch):
+                batch = self.gen_data_loader.next_batch()
+                batch_len = get_batch_seq_len(batch)
+                loss, _ = self.sess.run(
+                    [self.generator.pretrain_loss, self.generator.pretrain_updates],
+                    feed_dict={
+                        self.generator.x: batch,
+                        self.generator.x_len: batch_len,
+                        self.generator.learning_rate: 1e-3
+                    })
+                losses.append(loss)
+
+            end = time()
+
+            print('epoch:' + str(epoch) + '\t time:' + str(int(end - start)) + '\t loss:' + str(
+                np.mean(losses)) )
+
+            if epoch % 10 == 0:
+                samples, _, _, _, targets, _ = \
+                    generate_cond_samples(self, self.oracle_data_loader, output_file=self.generator_file, pass_rate=0.8)
+                get_real_test_file(self.generator_file, self._get_samples_fpath('MLE', epoch), self.iw_dict, targets=targets)
+                self.save(self.log_dir_MLE, epoch)
+
+    def pretrain_dis(self):
+        pass
+
+    def train_gan(self):
+        pass
+
+    def generate(self, batch, seed=None, seed_len=None, target_acts=None, temp=1):
+        gen_result = self.sess.run(self.generator.gen_x, feed_dict={
+            self.generator.temp: temp
+        })
+
+        dummy_acts = np.zeros((self.batch_size, self.sequence_length))
+        dummy_seed = np.zeros((self.batch_size, self.max_seed_len))
+
+        return gen_result.tolist(), dummy_acts, dummy_seed, np.zeors(self.batch_size), dummy_acts
+
+
+def get_helper(db, model_name, rlm=False):
     helper = None
     if model_name.startswith('tokmangan'):
         helper = Helper(db=db, save_dir='./save', name=model_name)
     elif model_name.startswith('maskgan'):
         helper = Helper4MaskGAN(db=db, save_dir='./save', name=model_name)
+    elif model_name.startswith('lm'):
+        helper = Helper4LM(db=db, save_dir='./save', name=model_name)
 
-    assert helper is not None
     assert db in ['coco', 'emnlp']
 
     if db == 'coco':
         data_loc = 'data/image_coco.txt'
         test_data_loc = 'data/testdata/image_coco.txt'
-        if os.path.exists('coco_dict.pkl'):
-            dicts = joblib.load('coco_dict.pkl')
-            sequence_length, vocab_size, wi_dict, iw_dict = \
-                init_training(helper.oracle_file, helper.test_oracle_file, data_loc, test_data_loc,
-                              wi_dict=dicts['wi_dict'], iw_dict=dicts['iw_dict'], max_seq_len=20)
-        else:
-            sequence_length, vocab_size, wi_dict, iw_dict =  \
-                init_training(helper.oracle_file, helper.test_oracle_file, data_loc, test_data_loc, max_seq_len=20)
-            joblib.dump({
-               'wi_dict': wi_dict,
-                'iw_dict' : iw_dict
-            }, 'coco_dict.pkl')
-
+        max_seq_len = 20
     else:
         data_loc = 'data/emnlp_news.txt'
         test_data_loc = 'data/testdata/emnlp_news.txt'
+        max_seq_len = 51
 
-        if os.path.exists('emnlp_dict.pkl'):
-            dicts = joblib.load('emnlp_dict.pkl')
-            sequence_length, vocab_size, wi_dict, iw_dict = \
-                init_training(helper.oracle_file, helper.test_oracle_file, data_loc, test_data_loc,
-                              wi_dict=dicts['wi_dict'], iw_dict=dicts['iw_dict'])
-        else:
-            sequence_length, vocab_size, wi_dict, iw_dict = \
-                init_training(helper.oracle_file, helper.test_oracle_file, data_loc, test_data_loc)
-            joblib.dump({
-                'wi_dict': wi_dict,
-                'iw_dict': iw_dict
-            }, 'emnlp_dict.pkl')
+    dict_fpath = '{}_dict.pkl'.format(db)
+
+    if os.path.exists(dict_fpath):
+        dicts = joblib.load(dict_fpath)
+        sequence_length, vocab_size, wi_dict, iw_dict = \
+            init_training(helper.oracle_file, helper.test_oracle_file, data_loc, test_data_loc,
+                          wi_dict=dicts['wi_dict'], iw_dict=dicts['iw_dict'], max_seq_len=max_seq_len)
+    else:
+        sequence_length, vocab_size, wi_dict, iw_dict = \
+            init_training(helper.oracle_file, helper.test_oracle_file, data_loc, test_data_loc, max_seq_len=20)
+        joblib.dump({
+            'wi_dict': wi_dict,
+            'iw_dict': iw_dict
+        }, dict_fpath)
+
+    if rlm:
+        data_loc = os.path.join(helper.save_dir, "{}_rlm_train.txt".format(db))
+        sequence_length, vocab_size, wi_dict, iw_dict = \
+            init_training(helper.oracle_file, helper.test_oracle_file, data_loc, test_data_loc,
+                          wi_dict=dicts['wi_dict'], iw_dict=dicts['iw_dict'],max_seq_len=max_seq_len)
 
     helper.sequence_length = sequence_length
     helper.vocab_size = vocab_size
@@ -693,8 +750,8 @@ def get_helper(db, model_name):
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('-g', '--gan_model', default='tokmangan', choices=['tokmangan', 'maskgan'])
-    ap.add_argument('-t', '--mode', default='GAN', choices=['GAN', 'MLE'])
+    ap.add_argument('-g', '--gan_model', default='lm', choices=['tokmangan', 'maskgan', 'lm'])
+    ap.add_argument('-t', '--mode', default='MLE', choices=['GAN', 'MLE'])
     ap.add_argument('-d', '--dataset', default='coco', choices=['coco', 'emnlp'])
     ap.add_argument('-s', '--unit_size', default=32, type=int)
     args = ap.parse_args()

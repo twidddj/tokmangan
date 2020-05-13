@@ -3,8 +3,8 @@ from tensorflow.python.ops import tensor_array_ops, control_flow_ops
 import numpy as np
 
 import common.attention_utils as attention_utils
-from common.utils import VariationalDropoutWrapper, make_mask, clip_and_log, get_train_op
-from common.config import START_TOKEN_IDX, END_TOKEN_IDX, PAD_TOKEN_IDX
+from common.utils import make_mask, clip_and_log, get_train_op
+from common.modules import Generator
 
 from maskgan.modules import Discriminator, Critic
 
@@ -15,41 +15,22 @@ def transform_input_with_is_missing_token(generator, inputs, targets_present):
   return transformed_input
 
 
-class MaskGAN(object):
+class MaskGAN(Generator):
     def __init__(self, num_vocabulary, batch_size, emb_dim, hidden_dim, sequence_length,
-                 reward_gamma=0.9, is_training=False, gen_vd_keep_prob=1, dis_vd_keep_prob=1):
+                 reward_gamma=0.9, is_training=False, gen_vd_keep_prob=1, dis_vd_keep_prob=1, n_rnn_layers=2,
+                 clip_val=5.0):
 
-        self.is_training = True
-        self.num_vocabulary = num_vocabulary
-        self.batch_size = batch_size
-        self.emb_dim = emb_dim
-        self.hidden_dim = hidden_dim
-
-        self.sequence_length = sequence_length
-
-        self.n_rnn_layers = 2
+        super().__init__(num_vocabulary, batch_size, emb_dim, hidden_dim, sequence_length, is_training,
+                         gen_vd_keep_prob=gen_vd_keep_prob, n_rnn_layers=n_rnn_layers, clip_val=clip_val)
 
         self.reward_gamma = reward_gamma
 
-        self.temperature = 1.0
-        self.clip_val = 5.0
-
-        self.gen_vd_keep_prob = gen_vd_keep_prob
         self.dis_vd_keep_prob = dis_vd_keep_prob
-
-        self.start_token = tf.constant([START_TOKEN_IDX] * self.batch_size, dtype=tf.int32)
-        self.end_token = tf.constant([END_TOKEN_IDX] * self.batch_size, dtype=tf.int32)
-        self.pad_token = tf.constant([PAD_TOKEN_IDX] * self.batch_size, dtype=tf.int32)
 
         self.is_training = is_training
 
-        # placeholder definition
-        self.x = tf.placeholder(tf.int32, shape=[self.batch_size, self.sequence_length], name="sparse_x")
+        # additional placeholder definition
         self.missing = tf.placeholder(tf.int32, shape=[self.batch_size, self.sequence_length], name="missing")
-        self.x_len = tf.placeholder(tf.int32, shape=[self.batch_size, ], name="x_len")  # n_x
-        self.learning_rate = tf.placeholder(tf.float32, name='learning_rate')
-        self.temp = tf.placeholder(tf.float32, name='temperature')
-
         self.masked_inputs = transform_input_with_is_missing_token(self, self.x, (1 - self.missing))
 
         with tf.variable_scope('MaskGAN'):
@@ -73,38 +54,13 @@ class MaskGAN(object):
             self.g_loss, self.g_updates = self.create_adversarial_loss(fake_predictions)
             self.dis_updates = tf.group(self.dis_updates, self.critic_updates)
 
-    def generate(self, sess):
-        outputs = sess.run(self.gen_x)
-        return outputs
-
-    def pretrain_step(self, sess, x):
-        outputs = sess.run([self.pretrain_updates, self.pretrain_loss], feed_dict={self.x: x})
-        return outputs
-
-    def init_matrix(self, shape):
-        return tf.random_normal(shape, stddev=0.1)
-
-    def init_vector(self, shape):
-        return tf.zeros(shape)
-
-    def g_optimizer(self, *args, **kwargs):
-        return tf.compat.v1.train.AdamOptimizer(*args, **kwargs)
-
     def create(self, reuse=None):
-        init_embeddings = tf.random_uniform([self.num_vocabulary, self.emb_dim], -1.0, 1.0)
+        g_embeddings = self.create_embedding()
         init_missing_embedding = tf.random_uniform([1, self.emb_dim], -1.0, 1.0)
-        g_embeddings = tf.get_variable("embeddings", initializer=init_embeddings)
         missing_embedding = tf.get_variable("missing_embedding", initializer=init_missing_embedding)
         self.g_embeddings = tf.concat([g_embeddings, missing_embedding], axis=0)
 
-        def lstm_cell():
-            return tf.contrib.rnn.BasicLSTMCell(self.hidden_dim, forget_bias=0.0, state_is_tuple=True, reuse=reuse)
-
-        attn_cell = lstm_cell
-        if self.is_training and self.gen_vd_keep_prob < 1:
-            def attn_cell():
-                return VariationalDropoutWrapper(lstm_cell(), self.batch_size, self.gen_vd_keep_prob, self.gen_vd_keep_prob)
-
+        attn_cell = self.create_cell(reuse=reuse)
         with tf.variable_scope('seed_encoder') as scope:
             embedded_seed = tf.nn.embedding_lookup(self.g_embeddings, self.masked_inputs)
 
@@ -206,7 +162,6 @@ class MaskGAN(object):
         self.gen_log_p = self.gen_log_p.stack()  # seq_length x batch_size
         self.gen_log_p = tf.transpose(self.gen_log_p, perm=[1, 0])  # batch_size x seq_length
         self.gen_log_p = tf.reshape(self.gen_log_p, shape=[self.batch_size, self.sequence_length])
-
 
     def create_pretrain_network(self):
         with tf.variable_scope('attention'):
@@ -320,16 +275,6 @@ class MaskGAN(object):
             loss = -tf.reduce_sum(one_hot_target * log_prob, -1)
             losses.append(tf.reduce_sum(loss * mask) / tf.reduce_sum(mask))
         return tf.reduce_mean(losses)
-
-    def create_output_unit(self):
-        self.Wo = tf.Variable(self.init_matrix([self.hidden_dim, self.num_vocabulary]), name='Wo')
-        self.bo = tf.Variable(self.init_matrix([self.num_vocabulary]), name='bo')
-
-        def unit(hidden_state):
-            logits = tf.matmul(hidden_state, self.Wo) + self.bo
-            return logits
-
-        return unit
 
 
 if __name__ == '__main__':
