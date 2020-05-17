@@ -25,7 +25,7 @@ class Generator(object):
         self.x = tf.placeholder(tf.int32, shape=[self.batch_size, self.sequence_length], name="sparse_x")
         self.x_len = tf.placeholder(tf.int32, shape=[self.batch_size, ], name="x_len")  # n_x
         self.learning_rate = tf.placeholder(tf.float32, name='learning_rate')
-        self.temp = tf.placeholder(tf.float32, name='temperature')
+        self.temp = tf.placeholder(tf.float32, shape=[], name='temperature')
 
     def create(self, reuse=None):
         with tf.variable_scope('LM'):
@@ -39,8 +39,10 @@ class Generator(object):
             self.create_network()
             self.create_pretrain_network()
 
+
         self.g_params = [var for var in tf.trainable_variables() if var.name.startswith('LM')]
         self.pretrain_loss, self.pretrain_updates = self.create_pretrain_loss()
+        self.masked_nlls = self.nll()
 
     def create_network(self):
         gen_log_p = tensor_array_ops.TensorArray(dtype=tf.float32, size=self.sequence_length, dynamic_size=False,
@@ -154,6 +156,21 @@ class Generator(object):
             loss = -tf.reduce_sum(one_hot_target * log_prob, -1)
             losses.append(tf.reduce_sum(loss) / self.sequence_length)
         return tf.reduce_mean(losses)
+
+    def nll(self):
+        losses = []
+
+        masks = tf.sequence_mask(self.x_len, maxlen=self.sequence_length, dtype=tf.float32)
+        for i in range(self.batch_size):
+            target = self.x[i]
+            prediction = self.g_predictions[i]
+            mask = masks[i]
+
+            one_hot_target = tf.one_hot(tf.cast(tf.reshape(target, [-1]), tf.int32), self.num_vocabulary, 1.0, 0.0)
+            log_prob = clip_and_log(tf.reshape(prediction, [-1, self.num_vocabulary]))
+            loss = -tf.reduce_sum(one_hot_target * log_prob, -1)
+            losses.append(tf.reduce_sum(loss * mask) / tf.reduce_sum(mask))
+        return losses
 
     def create_embedding(self):
         init_embeddings = tf.random_uniform([self.num_vocabulary, self.emb_dim], -1.0, 1.0)
@@ -276,7 +293,7 @@ if __name__ == '__main__':
     tf.reset_default_graph()
     batch_size, emb_dim, hidden_dim = 2, 3, 3
     sequence_length = 10
-    generator = Generator(100, batch_size, emb_dim, hidden_dim, sequence_length, is_training=True)
+    generator = Generator(100, batch_size, emb_dim, hidden_dim, sequence_length, is_training=False)
     generator.create()
     for var in tf.trainable_variables():
         print(var.op.name)

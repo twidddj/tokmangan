@@ -133,22 +133,23 @@ def init_training(train_file, test_file, data_loc, test_data_loc, wi_dict=None, 
     with open(train_file, 'w') as outfile:
         outfile.write(text_to_code(tokens, wi_dict, sequence_length))
 
-    # for test data
-    # the data including words that not included in the training data were excluded
-    # see ./save/testdata/processed_image_coco.txt
-    test_tokens = get_tokenlized(test_data_loc, add_end_token=True, max_seq_len=max_seq_len)
-    filtered_tokens = []
-    for token in test_tokens:
-        check = True
-        for _tok in token:
-            if not _tok in wi_dict:
-                check = False
-                break
-        if check:
-            filtered_tokens.append(token)
+    if test_file is not None:
+        # for test data
+        # the data including words that not included in the training data were excluded
+        # see ./save/testdata/processed_image_coco.txt
+        test_tokens = get_tokenlized(test_data_loc, add_end_token=True, max_seq_len=max_seq_len)
+        filtered_tokens = []
+        for token in test_tokens:
+            check = True
+            for _tok in token:
+                if not _tok in wi_dict:
+                    check = False
+                    break
+            if check:
+                filtered_tokens.append(token)
 
-    with open(test_file, 'w') as outfile:
-        outfile.write(text_to_code(filtered_tokens, wi_dict, sequence_length))
+        with open(test_file, 'w') as outfile:
+            outfile.write(text_to_code(filtered_tokens, wi_dict, sequence_length))
 
     return sequence_length, vocab_size, wi_dict, iw_dict
 
@@ -194,6 +195,9 @@ class Helper:
         self.log_dir_MLE = log_dir_MLE
         self.log_dir_GAN = log_dir_GAN
 
+        self.wi_dict = None
+        self.iw_dict = None
+
     def init(self):
         self.sess = init_sess()
         self.max_seed_len = int(self.sequence_length * self.max_present_rate) + 1
@@ -208,6 +212,12 @@ class Helper:
         self.sess.run(tf.global_variables_initializer())
 
         self._build_data_loader()
+
+    def load_data(self, fpath, loader):
+        _, _, _, _ = \
+            init_training(self.oracle_file, None, fpath, None,
+                          wi_dict=self.wi_dict, iw_dict=self.iw_dict, max_seq_len=self.sequence_length)
+        loader.create_batches(self.oracle_file)
 
     def _build_data_loader(self):
         self.gen_data_loader = DataLoader(batch_size=self.batch_size, seq_length=self.sequence_length)
@@ -695,7 +705,7 @@ class Helper4LM(Helper):
         dummy_acts = np.zeros((self.batch_size, self.sequence_length))
         dummy_seed = np.zeros((self.batch_size, self.max_seed_len))
 
-        return gen_result.tolist(), dummy_acts, dummy_seed, np.zeors(self.batch_size), dummy_acts
+        return gen_result.tolist(), dummy_acts, dummy_seed, np.zeros(self.batch_size), dummy_acts
 
 
 def get_helper(db, model_name, rlm=False):
@@ -727,7 +737,7 @@ def get_helper(db, model_name, rlm=False):
                           wi_dict=dicts['wi_dict'], iw_dict=dicts['iw_dict'], max_seq_len=max_seq_len)
     else:
         sequence_length, vocab_size, wi_dict, iw_dict = \
-            init_training(helper.oracle_file, helper.test_oracle_file, data_loc, test_data_loc, max_seq_len=20)
+            init_training(helper.oracle_file, helper.test_oracle_file, data_loc, test_data_loc, max_seq_len=max_seq_len)
         joblib.dump({
             'wi_dict': wi_dict,
             'iw_dict': iw_dict
@@ -750,8 +760,8 @@ def get_helper(db, model_name, rlm=False):
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('-g', '--gan_model', default='lm', choices=['tokmangan', 'maskgan', 'lm'])
-    ap.add_argument('-t', '--mode', default='MLE', choices=['GAN', 'MLE'])
+    ap.add_argument('-g', '--gan_model', default='tokmangan', choices=['tokmangan', 'maskgan', 'lm'])
+    ap.add_argument('-t', '--mode', default='GAN', choices=['GAN', 'MLE'])
     ap.add_argument('-d', '--dataset', default='coco', choices=['coco', 'emnlp'])
     ap.add_argument('-s', '--unit_size', default=32, type=int)
     args = ap.parse_args()
@@ -770,13 +780,10 @@ if __name__ == '__main__':
     helper.emb_dim = args.unit_size
     helper.hidden_dim = args.unit_size
 
-    helper.pre_epoch_num = 80
-    helper.pre_dis_epoch_num = 5
-    helper.adversarial_epoch_num = 200
-
     print(helper.sequence_length, helper.vocab_size)
 
     if args.mode == 'MLE':
+        helper.pre_epoch_num = 100
         helper.train(pretrain_gen=True, pretrain_dis=False, train_gan=False)
     else:
         helper.adversarial_epoch_num = 200
