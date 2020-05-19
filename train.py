@@ -202,8 +202,11 @@ class Helper:
         self.print_every = 10
         self.save_every = 10
 
+        self.sess = None
+
     def init(self):
-        self.sess = init_sess()
+        if self.sess is None:
+            self.sess = init_sess()
         self.max_seed_len = int(self.sequence_length * self.max_present_rate) + 1
 
     def build(self):
