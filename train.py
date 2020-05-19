@@ -802,7 +802,6 @@ def get_helper(db, model_name, rlm=False, rlm_data_loc=None):
     helper.wi_dict = wi_dict
     helper.iw_dict = iw_dict
 
-    helper.init()
     return helper
 
 
