@@ -11,6 +11,7 @@ from common.text_process import text_precess, text_to_code
 from common.text_process import get_tokenlized, get_word_list, get_dict
 import joblib
 
+CWD = os.path.dirname(os.path.abspath(__file__))
 
 def get_batch_seq_len(xs):
     return list(map(lambda x: len([y for y in x if y != END_TOKEN_IDX and y != PAD_TOKEN_IDX]), xs))
@@ -198,6 +199,9 @@ class Helper:
         self.wi_dict = None
         self.iw_dict = None
 
+        self.print_every = 10
+        self.save_every = 10
+
     def init(self):
         self.sess = init_sess()
         self.max_seed_len = int(self.sequence_length * self.max_present_rate) + 1
@@ -349,7 +353,7 @@ class Helper:
             print('epoch:' + str(epoch) + '\t time:' + str(int(end - start)) + '\t loss:' + str(
                 np.mean(losses)) + '\t act_loss:' + str(np.mean(act_losses)))
 
-            if epoch % 10 == 0:
+            if epoch % self.save_every == 0:
                 samples, acts, seed, seed_len, targets, target_acts = \
                     generate_cond_samples(self, self.oracle_data_loader, output_file=self.generator_file, pass_rate=0.8)
                 get_real_test_file(self.generator_file, self._get_samples_fpath('MLE', epoch), self.iw_dict,
@@ -431,7 +435,7 @@ class Helper:
             _dis_losses = np.mean(dis_losses, axis=0)
             print(log_tmpl.format(epoch, end - start, _gan_loss, _dis_losses[0], _dis_losses[1], _dis_losses[2]))
 
-            if epoch % 10 == 0:
+            if epoch % self.save_every == 0:
                 samples, acts, seed, _, targets, _ = generate_cond_samples(self, self.oracle_data_loader,
                                                                      output_file=self.generator_file, pass_rate=0.8)
                 get_real_test_file(self.generator_file, self._get_samples_fpath('GAN', epoch), self.iw_dict, seed=seed,
@@ -549,7 +553,7 @@ class Helper4MaskGAN(Helper):
             print('epoch:' + str(epoch) + '\t time:' + str(int(end - start)) + '\t loss:' + str(
                 np.mean(losses)) )
 
-            if epoch % 10 == 0:
+            if epoch % self.save_every == 0:
                 samples, _, seed, _, targets, missing = \
                     generate_cond_samples(self, self.oracle_data_loader, output_file=self.generator_file, pass_rate=0.8)
                 get_real_test_file(self.generator_file, self._get_samples_fpath('MLE', epoch), self.iw_dict,
@@ -627,7 +631,7 @@ class Helper4MaskGAN(Helper):
             _dis_losses = np.mean(dis_losses, axis=0)
             print(log_tmpl.format(epoch, end - start, _gan_loss, _dis_losses[0], _dis_losses[1], _dis_losses[2]))
 
-            if epoch % 10 == 0:
+            if epoch % self.save_every == 0:
                 samples, _, seed, _, targets, missing = generate_cond_samples(self, self.oracle_data_loader,
                                                                      output_file=self.generator_file, pass_rate=0.8)
                 get_real_test_file(self.generator_file, self._get_samples_fpath('GAN', epoch), self.iw_dict, seed=seed,
@@ -661,6 +665,7 @@ class Helper4LM(Helper):
         self._build_data_loader()
 
     def pretrain(self):
+        best_rlm = np.Inf
         last_epoch = self.load(self.log_dir_MLE)
         if last_epoch is None:
             last_epoch = 0
@@ -668,7 +673,7 @@ class Helper4LM(Helper):
             start = time()
             losses = []
             self.gen_data_loader.reset_pointer()
-            for it in range(self.gen_data_loader.num_batch):
+            for _ in range(self.gen_data_loader.num_batch):
                 batch = self.gen_data_loader.next_batch()
                 batch_len = get_batch_seq_len(batch)
                 loss, _ = self.sess.run(
@@ -682,14 +687,49 @@ class Helper4LM(Helper):
 
             end = time()
 
-            print('epoch:' + str(epoch) + '\t time:' + str(int(end - start)) + '\t loss:' + str(
-                np.mean(losses)) )
+            log_msg = "epoch:{0:} \t elapsed:{1:.0f}s \t loss:{2:.3f}".format(epoch, end - start, np.mean(losses))
+            if self.rlm:
+                rlms = []
 
-            if epoch % 10 == 0:
-                samples, _, _, _, targets, _ = \
-                    generate_cond_samples(self, self.oracle_data_loader, output_file=self.generator_file, pass_rate=0.8)
-                get_real_test_file(self.generator_file, self._get_samples_fpath('MLE', epoch), self.iw_dict, targets=targets)
-                self.save(self.log_dir_MLE, epoch)
+                self.oracle_data_loader.reset_pointer()
+                start = time()
+                for _ in range(self.oracle_data_loader.num_batch):
+                    batch = self.oracle_data_loader.next_batch()
+                    batch_len = get_batch_seq_len(batch)
+                    _nlls = self.sess.run(self.generator.masked_nlls, feed_dict={
+                        self.generator.x: batch,
+                        self.generator.x_len: batch_len
+                    })
+                    rlms.append(np.mean(_nlls))
+                
+                current_rlm = np.mean(rlms)
+                best_rlm = min(current_rlm, best_rlm)
+                end = time()
+
+                if epoch % self.print_every == 0:
+                    print(log_msg)
+                    print('\ttime:{0:.0f}s \tbest_rlm:{1:.3f} \tcurrent_rlm:{2:.3f}'.format(end-start, best_rlm, current_rlm))
+
+            else:
+                print(log_msg)
+                if epoch % self.save_every == 0:
+                    samples, _, _, _, targets, _ = \
+                        generate_cond_samples(self, self.oracle_data_loader, output_file=self.generator_file, pass_rate=0.8)
+                    get_real_test_file(self.generator_file, self._get_samples_fpath('MLE', epoch), self.iw_dict, targets=targets)
+                    self.save(self.log_dir_MLE, epoch)
+            
+        return best_rlm
+
+    def train(self, pretrain_gen=True, pretrain_dis=True, train_gan=True):
+        self.init()
+        self.build()
+
+        if pretrain_gen:
+            print('start pre-train generator:')
+            rlm_score = self.pretrain()
+        else:
+            self.load(self.log_dir_MLE)
+        return rlm_score
 
     def pretrain_dis(self):
         pass
@@ -708,27 +748,35 @@ class Helper4LM(Helper):
         return gen_result.tolist(), dummy_acts, dummy_seed, np.zeros(self.batch_size), dummy_acts
 
 
-def get_helper(db, model_name, rlm=False):
+def get_helper(db, model_name, rlm=False, rlm_data_loc=None):
     helper = None
+    save_dir = os.path.join(CWD, 'save')
     if model_name.startswith('tokmangan'):
-        helper = Helper(db=db, save_dir='./save', name=model_name)
+        helper = Helper(db=db, save_dir=save_dir, name=model_name)
     elif model_name.startswith('maskgan'):
-        helper = Helper4MaskGAN(db=db, save_dir='./save', name=model_name)
+        helper = Helper4MaskGAN(db=db, save_dir=save_dir, name=model_name)
     elif model_name.startswith('lm'):
-        helper = Helper4LM(db=db, save_dir='./save', name=model_name)
+        if rlm:
+            save_dir = os.path.join(save_dir, 'rlm')
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+
+        helper = Helper4LM(db=db, save_dir=save_dir, name=model_name)
+        helper.rlm = rlm
 
     assert db in ['coco', 'emnlp']
-
+    data_dir = os.path.join(CWD, 'data')
+    test_data_dir = os.path.join(data_dir, 'testdata')
     if db == 'coco':
-        data_loc = 'data/image_coco.txt'
-        test_data_loc = 'data/testdata/image_coco.txt'
+        data_loc = os.path.join(data_dir, 'image_coco.txt')
+        test_data_loc = os.path.join(test_data_dir, 'processed_image_coco.txt')
         max_seq_len = 20
     else:
-        data_loc = 'data/emnlp_news.txt'
-        test_data_loc = 'data/testdata/emnlp_news.txt'
+        data_loc = os.path.join(data_dir, 'emnlp_news.txt')
+        test_data_loc = os.path.join(test_data_dir, 'emnlp_news.txt')
         max_seq_len = 51
 
-    dict_fpath = '{}_dict.pkl'.format(db)
+    dict_fpath = os.path.join(CWD, '{}_dict.pkl'.format(db))
 
     if os.path.exists(dict_fpath):
         dicts = joblib.load(dict_fpath)
@@ -744,7 +792,7 @@ def get_helper(db, model_name, rlm=False):
         }, dict_fpath)
 
     if rlm:
-        data_loc = os.path.join(helper.save_dir, "{}_rlm_train.txt".format(db))
+        data_loc = rlm_data_loc
         sequence_length, vocab_size, wi_dict, iw_dict = \
             init_training(helper.oracle_file, helper.test_oracle_file, data_loc, test_data_loc,
                           wi_dict=dicts['wi_dict'], iw_dict=dicts['iw_dict'],max_seq_len=max_seq_len)
@@ -779,11 +827,12 @@ if __name__ == '__main__':
     helper.max_present_rate = 0.75
     helper.emb_dim = args.unit_size
     helper.hidden_dim = args.unit_size
+    helper.print_every = 1
 
     print(helper.sequence_length, helper.vocab_size)
 
     if args.mode == 'MLE':
-        helper.pre_epoch_num = 100
+        helper.pre_epoch_num = 80
         helper.train(pretrain_gen=True, pretrain_dis=False, train_gan=False)
     else:
         helper.adversarial_epoch_num = 200

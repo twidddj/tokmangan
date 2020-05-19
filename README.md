@@ -23,7 +23,7 @@ if a blank is added then fill it, otherwise decides how utilize a given token (u
 
 ## Synthetic data experiment
 * You can find text samples synthesized in <a href="./save/coco_tokmangan">here</a>
-* Codes for evaluation are placed in <a href="./evaluation.ipynb">here</a>
+* Codes for evaluation are placed in <a href="./eval">here</a>
 
 ## Requirements
 * Code is tested on TensorFlow version 1.14 for Python 3.6.
