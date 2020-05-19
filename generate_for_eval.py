@@ -91,8 +91,8 @@ if __name__ == '__main__':
             generate_cond_samples(helper, helper.oracle_data_loader, temp=temp, output_file=helper.generator_file, pass_rate=0.0)
 
         fpath = helper.get_samples_fpath(mode, epoch, temp=temp)
-
         get_real_test_file(helper.generator_file, fpath, helper.iw_dict)
+        print(fpath)
 
         # generate conditional samples
         seed_info_dict = seed_extraction(db, model_name, present_rates=[0.25, 0.5, 0.75])
@@ -121,5 +121,5 @@ if __name__ == '__main__':
 
             fpath = helper.get_samples_fpath(mode, epoch, temp=temp)
             get_real_test_file(samples, fpath, helper.iw_dict)
-
+            print(fpath)
 
