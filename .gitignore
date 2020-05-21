@@ -4,6 +4,7 @@ save/*/coco*.txt
 save/*/generator.txt
 save/*/oracle.txt
 save/*/test_oracle.txt
+save/rlm/*
 
 .DS_Store
 .idea
